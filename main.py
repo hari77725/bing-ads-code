@@ -71,7 +71,7 @@ def authenticate_with_oauth(authorization_data):
     try:
         # If we have a refresh token let's refresh it
         if refresh_token is not None:
-            authorization_data.authentication.request_oauth_tokens_by_refresh_token(refresh_token)
+            print(authorization_data.authentication.request_oauth_tokens_by_refresh_token(refresh_token))
         else:
             request_user_consent(authorization_data)
     except OAuthTokenRequestException:

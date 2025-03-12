@@ -5,8 +5,9 @@ from campaignmanagement_example_helper import *
 from main import *
 
 # Required
-DEVELOPER_TOKEN='BBD37VB98' # Universal token for sandbox
-ENVIRONMENT='sandbox' # If you use 'production' then you must also update the DEVELOPER_TOKEN value.
+# DEVELOPER_TOKEN='BBD37VB98' # Universal token for sandbox
+DEVELOPER_TOKEN='1455DHRGAV939488'
+ENVIRONMENT='production' # If you use 'production' then you must also update the DEVELOPER_TOKEN value.
 
 # The CLIENT_ID is required and CLIENT_STATE is recommended.
 # The REFRESH_TOKEN should always be in a secure location.
@@ -121,8 +122,8 @@ if __name__ == '__main__':
     print("Loading the web service client proxies...")
     
     authorization_data=AuthorizationData(
-        account_id='526065840',
-        customer_id='355788527',
+        account_id='187005313',
+        customer_id='254303037',
         developer_token=DEVELOPER_TOKEN,
         authentication=None,
     )

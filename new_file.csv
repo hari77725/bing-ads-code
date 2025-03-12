@@ -1,0 +1,4 @@
+Type,Status,Id,Parent Id,Client Id,Modified Time,Name,Description,Scope,Audience,Action Type,Sub Type,Text
+Format Version,,,,,,6.0,,,,,,
+Customer List,Active,-10,,ClientIdGoesHere,,,New customer list description,Customer,New Customer List,Add,,
+Customer List Item,,,-10,ClientIdGoesHere,,,,,,,Email,HashedValue

@@ -1,0 +1,531 @@
+from datetime import datetime
+import sys
+from bingads.authorization import AuthorizationData, OAuthDesktopMobileAuthCodeGrant
+from bingads.v13.bulk import (
+    BulkServiceManager, 
+    SubmitDownloadParameters, 
+    BulkFileReader, 
+    BulkFileWriter, 
+    BulkCustomerList, 
+    ResultFileType, 
+    FileUploadParameters,
+    BulkCustomerListItem,
+    DownloadParameters
+)
+
+from bingads.service_client import ServiceClient
+from typing import List, Generator, Optional , Any
+import logging
+import os
+import csv
+csv.field_size_limit(sys.maxsize)
+from campaignmanagement_example_helper import output_array_of_batcherror, output_status_message
+from main import set_elements_to_none
+import random
+import string
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# Constants
+DEVELOPER_TOKEN = 'BBD37VB98'
+ACCOUNT_ID = '526065840'
+CUSTOMER_ID = '355788527'
+CLIENT_ID = '4c0b021c-00c3-4508-838f-d3127e8167ff'
+REFRESH_TOKEN = 'M.C1_EUS.0.U.-BOVDZJsLDmzsX0cC!6guYba80l55Sc!H8lesZ4!OfWnxsiMcZvsBuvr20nwukWfpembegBbI2KPR5vTDcd8hcpgH5fWy9kB06RmYG0GMw0EQf8Mn!toyu0IQYhmbeEFFMwG2fdqW9nWU62b63CSCNevWhZu5d!pa5PN0FbGzvyMHutPUiaUvqOb8os4V8AkGfmo739yKt3*ze*O331n5ugbVQSZ0Xzv*hcNi1hsoDtgxSVVc3gW5!BhdxpcbZdaRCdz5XSR4FIvDtyXbjJHSYpCKCz3XbRwv5VGhMhIh*YmA7koQ*VWGaLV35w5avQfGVCwk4uilQ3SxnkiTQQapk2aL4DRBXj47ZtP78CQEdW12BnMQyaxA*bcqx8lNR5HoJOj!zuxwmDDOp0E4vivGa5H5CPwGal3QoSVN7mat7JEyOTDNKu4B8!j23KHIkpxn!w$$'
+
+class BingAdsManager:
+    def __init__(self):
+        self.authorization_data = self._get_authorization_data()
+        self.bulk_service_manager = self._get_bulk_service_manager()
+        self.campaign_service = self._get_campaign_service()
+
+    def _get_authorization_data(self) -> AuthorizationData:
+        auth = AuthorizationData(
+            account_id=ACCOUNT_ID,
+            customer_id=CUSTOMER_ID,
+            developer_token=DEVELOPER_TOKEN,
+            authentication=OAuthDesktopMobileAuthCodeGrant(
+                client_id=CLIENT_ID,
+                env='sandbox'
+            )
+        )
+        auth.authentication.request_oauth_tokens_by_refresh_token(REFRESH_TOKEN)
+        return auth
+
+    def _get_bulk_service_manager(self) -> BulkServiceManager:
+        return BulkServiceManager(
+            authorization_data=self.authorization_data,
+            poll_interval_in_milliseconds=35000,
+            environment='sandbox'
+        )
+    
+    def _get_all_customer_lists(self) -> List[BulkCustomerList]:
+        bulk_service_manager = self._get_bulk_service_manager()
+        submit_download_parameters = SubmitDownloadParameters(
+            data_scope=['EntityData'],
+            download_entities=['CustomerLists'],
+            file_type='Csv'
+        )
+        bulk_file_operation = bulk_service_manager.submit_download(submit_download_parameters)
+        download_status = bulk_file_operation.track(timeout_in_milliseconds=3600000)
+        if not bulk_file_operation:
+            raise Exception("Failed to submit download operation")
+        
+        if download_status.status != 'Completed':
+            raise Exception(f"Download failed with status: {download_status.status}")
+    
+        result_file_path = bulk_file_operation.download_result_file(
+            result_file_directory='./',
+            result_file_name='result_latest.csv',
+            decompress=True,
+            overwrite=True,
+            timeout_in_milliseconds=3600000
+        )
+        
+        print(f"Download result file: {result_file_path}")
+
+    def _get_campaign_service(self) -> ServiceClient:
+        return ServiceClient(
+            service='CampaignManagementService',
+            version=13,
+            authorization_data=self.authorization_data,
+            environment='sandbox'
+        )
+
+    def get_all_customer_lists(self) -> List[BulkCustomerList]:
+        return self._get_all_customer_lists()
+
+    def create_customer_list(self, name: str, description: str) -> BulkCustomerList:
+        campaign_types = self.campaign_service.factory.create('ns3:ArrayOfstring')
+        campaign_types.string = ['Audience']
+
+        customer_list = self.campaign_service.factory.create('CustomerList')
+        customer_list.AudienceNetworkSize = 30
+        customer_list.Description = description
+        customer_list.MembershipDuration = 30
+        customer_list.Name = name
+        customer_list.ParentId = int(ACCOUNT_ID)
+        customer_list.Scope = "Customer"
+        customer_list.SearchSize = 300
+        customer_list.SupportedCampaignTypes = campaign_types
+        customer_list.Type = "CustomerList"
+
+        bulk_customer_list = BulkCustomerList()
+        bulk_customer_list.customer_list = customer_list
+        return bulk_customer_list
+
+    def upload_customer_lists(self, customer_lists: List[BulkCustomerList]) -> None:
+        try:
+            writer = BulkFileWriter('./upload.csv')
+            for entity in customer_lists:
+                writer.write_entity(entity)
+            writer.close()
+
+            upload_params = FileUploadParameters(
+                result_file_directory='./',
+                compress_upload_file=True,
+                result_file_name='result.csv',
+                overwrite_result_file=True,
+                upload_file_path='./upload.csv',
+                response_mode='ErrorsAndResults'
+            )
+
+            bulk_file_path = self.bulk_service_manager.upload_file(
+                file_upload_parameters=upload_params,
+                progress=lambda x: logger.info(f"Upload progress: {x.percent_complete}%")
+            )
+
+            self._process_upload_results(bulk_file_path)
+
+        except Exception as e:
+            logger.error(f"Error uploading customer lists: {str(e)}")
+            raise
+
+    def update_customer_lists(self, update_id : int , **update_fields: dict[str,Any]) -> None:
+        campaign_types = self.campaign_service.factory.create('ns3:ArrayOfstring')
+        campaign_types.string = ['Audience']
+
+        customer_list = self.campaign_service.factory.create('CustomerList')
+        customer_list.Id = update_id
+        
+        if 'audience_network_size' in update_fields:
+            customer_list.AudienceNetworkSize = update_fields['audience_network_size']
+        if 'audience_network_size' not in update_fields:
+            customer_list.AudienceNetworkSize = 30
+            
+        if 'description' in update_fields:
+            customer_list.Description = update_fields['description']
+            
+        if 'membership_duration' in update_fields:
+            customer_list.MembershipDuration = update_fields['membership_duration']
+        if 'membership_duration' not in update_fields:
+            customer_list.MembershipDuration = 30
+            
+        if 'name' in update_fields:
+            customer_list.Name = update_fields['name']
+            
+        if True:
+            customer_list.ParentId = int(ACCOUNT_ID)
+        if True:
+            customer_list.Scope = "Customer"
+        
+        if 'search_size' in update_fields:
+            customer_list.SearchSize = update_fields['search_size']
+        if 'search_size' not in update_fields:
+            customer_list.SearchSize = 300
+            
+        if True:
+            customer_list.SupportedCampaignTypes = campaign_types
+        if True:
+            customer_list.Type = "CustomerList"
+
+        bulk_customer_list = BulkCustomerList()
+        bulk_customer_list.customer_list = customer_list
+
+        try:
+            self.upload_customer_lists([bulk_customer_list])
+        except Exception as e:
+            logger.error(f"Error updating customer list: {str(e)}")
+            raise
+
+    # def update_audience_data(self, parent_id: int , name : str ):
+    #     raise NotImplementedError("Not implemented")
+    
+    def update_audience_data(self, parent_id: int, name: str, action_type: str = "Add", audience_data: List[str] = None):
+        """
+        Updates audience data for a customer list with email addresses.
+        
+        Args:
+            parent_id: The ID of the customer list to update
+            name: The name of the customer list
+            action_type: The action type ("Add", "Remove", or "Replace")
+            audience_data: List of email addresses to update
+        """
+        if not audience_data:
+            raise ValueError("audience_data cannot be empty")
+        
+        if not parent_id and not name:
+            raise ValueError("parent_id or name are required")
+        
+        
+        # try:
+        #     with BulkFileWriter('./audience_upload.csv') as writer:
+        #         campaign_types = self.campaign_service.factory.create('ns3:ArrayOfstring')
+        #         campaign_types.string = ['Audience']
+
+        #         for email in audience_data:
+        #             bulk_customer_list_item = BulkCustomerListItem()
+        #             bulk_customer_list_item.parent_id = parent_id
+        #             bulk_customer_list_item.sub_type = "Email"
+        #             bulk_customer_list_item.text = email
+
+        #             writer.write_entity(bulk_customer_list_item)
+
+        #         upload_params = FileUploadParameters(
+        #             result_file_directory='./',
+        #             result_file_name='audience_result.csv',
+        #             upload_file_path='./audience_upload.csv',
+        #             response_mode='ErrorsAndResults',
+        #             compress_upload_file=True,
+        #             overwrite_result_file=True,
+        #             rename_upload_file_to_match_request_id=False
+        #         )
+
+        #         bulk_file_path = self.bulk_service_manager.upload_file(
+        #             file_upload_parameters=upload_params,
+        #             progress=lambda x: logger.info(f"Upload progress: {x.percent_complete}%")
+        #         )
+
+        #         self._process_upload_results(bulk_file_path)
+
+
+        # except Exception as e:
+        #     logger.error(f"Error updating audience data: {str(e)}")
+        #     raise
+
+        try:
+            # download_parameters=DownloadParameters(
+            #     download_entities=['CustomerLists'],
+            #     result_file_directory='./',
+            #     data_scope=['EntityData'],
+            #     result_file_name="existing_lists.csv",
+            #     overwrite_result_file=True,
+            #     last_sync_time_in_utc=None
+            # )
+
+            # self.bulk_service_manager.download_file(download_parameters)
+
+            # for entity in self.read_download_file("".join([os.getcwd(), "/existing_lists.csv"])):
+            #     if isinstance(entity, BulkCustomerList):
+            #         print(f"Customer List Name: {entity.customer_list.Name}, ID: {entity.customer_list.Id}")
+            #     else:
+            #         print(entity.__dict__)
+
+            # Create bulk upload file with parent and items
+            with BulkFileWriter('./customer_list_upload.csv') as writer:
+                # Write parent CustomerList first
+                bulk_customer_list = BulkCustomerList()
+
+                customer_list = set_elements_to_none(self.campaign_service.factory.create('CustomerList'))
+                print(customer_list)
+                customer_list.Id = parent_id
+                
+                
+                bulk_customer_list.customer_list = customer_list
+                bulk_customer_list.status = "Active"
+                bulk_customer_list.action_type = action_type
+                
+                entities_to_write = [bulk_customer_list]
+                
+                # Write CustomerListItems
+                for email in audience_data:
+                    list_item = BulkCustomerListItem()
+                    list_item.parent_id = parent_id
+                    list_item.sub_type = "Email"
+                    list_item.text = email
+                    entities_to_write.append(list_item)
+
+                for entity in entities_to_write:
+                    writer.write_entity(entity)
+
+            # Upload combined file
+            upload_params = FileUploadParameters(
+                result_file_directory='./',
+                result_file_name='upload_results.csv',
+                upload_file_path='./customer_list_upload.csv',
+                response_mode='ErrorsAndResults',
+                compress_upload_file=True,
+                overwrite_result_file=True
+            )
+            bulk_file_path = self.bulk_service_manager.upload_file(
+            file_upload_parameters=upload_params,
+            progress=lambda x: logger.info(f"Upload progress: {x.percent_complete}%")
+            )
+
+            return self._process_upload_results(bulk_file_path)
+
+            
+        except Exception as e:
+            logger.error(f"Error updating audience data: {str(e)}")
+            raise
+
+    def update_audience_data_method(self, parent_id: int, name: str, action_type: str = "Add", audience_data: List[str] = None):
+        try:
+            customer_list = set_elements_to_none(self.campaign_service.factory.create('CustomerList'))
+            customer_list.Id = parent_id
+
+            print(customer_list)
+
+            customer_list_item = set_elements_to_none(self.campaign_service.factory.create('CustomerListUserData'))
+            print(customer_list_item)
+
+            customer_list_item.ActionType = action_type
+            customer_list_item.AudienceId = parent_id
+            customer_list_item.CustomerListItemSubType = "Email"
+
+            arr = self.campaign_service.factory.create('ns3:ArrayOfstring')
+            
+            for email in audience_data:
+                arr.string.append(email)
+
+            customer_list_item.CustomerListItems = arr
+
+            response = self.campaign_service.ApplyCustomerListUserData(customer_list_item)
+            output_status_message("PartialErrors:")
+            output_array_of_batcherror(response)
+        except Exception as e:
+            logger.error(f"Error updating audience data: {str(e)}")
+            raise
+
+
+
+
+    def _process_upload_results(self, bulk_file_path: str) -> None:
+        try:
+            entities = self._read_bulk_file(bulk_file_path)
+            for entity in entities:
+                if isinstance(entity, BulkCustomerList):
+                    logger.info(f"Uploaded customer list: {entity.customer_list.Name}")
+                if isinstance(entity, BulkCustomerListItem) and entity._errors:
+                    for error in entity._errors:
+                        logger.error(
+                            f"\nBulk Upload Error:"
+                            f"\n  Error Code: {error.error}"
+                            f"\n  Error Number: {error.number}"
+                            f"\n  Item Text: {entity.text}"
+                            f"\n  Parent ID: {entity.parent_id}"
+                            f"\n  Sub Type: {entity.sub_type}"
+                            f"\n  Editorial Reason Code: {getattr(error, 'editorial_reason_code', 'N/A')}"
+                            f"\n  Editorial Location: {getattr(error, 'editorial_location', 'N/A')}"
+                            f"\n  Editorial Term: {getattr(error, 'editorial_term', 'N/A')}"
+                        )
+
+                if(isinstance, BulkCustomerList):
+                    logger.info(
+                        f"\nSuccessful Upload:"
+                        f"\n{entity}"
+                        
+                    )
+                else:
+                    logger.info(
+                        f"\nSuccessful Upload:"
+                        f"\n  Text: {entity.text}"
+                        f"\n  Parent ID: {entity.parent_id}"
+                        f"\n  Sub Type: {entity.sub_type}"
+                    )
+        except Exception as e:
+            logger.error(f"Error processing upload results: {str(e)}")
+            raise
+
+    def _read_bulk_file(self, file_path: str) -> Generator:
+        with BulkFileReader(
+            file_path=file_path,
+            result_file_type=ResultFileType.upload,
+            file_type='Csv'
+        ) as reader:
+            for entity in reader:
+                yield entity
+
+
+    def read_download_file(self, file_path: str) -> Generator:
+        with BulkFileReader(
+            file_path=file_path,
+            result_file_type=ResultFileType.full_download,
+            file_type='Csv'
+        ) as reader:
+            for entity in reader:
+                yield entity
+
+    def create_audience_sdk(self):
+        campaign_types = self.campaign_service.factory.create('ns3:ArrayOfstring')
+        campaign_types.string = ['Audience']
+
+        customer_list = self.campaign_service.factory.create('CustomerList')
+        customer_list.AudienceNetworkSize = 30
+        customer_list.Description = "Created from SDK"
+        customer_list.MembershipDuration = 30
+        customer_list.Name = "SDK Customer List 2"
+        customer_list.Scope = "Customer"
+        customer_list.SearchSize = 300
+        customer_list.SupportedCampaignTypes = campaign_types
+        customer_list.Type = "CustomerList"
+
+
+        try:
+            audiences = set_elements_to_none(self.campaign_service.factory.create('ArrayOfAudience'))
+            audiences.Audience = customer_list
+            response = self.campaign_service.AddAudiences(
+                Audiences=[audiences]
+            )
+
+            if hasattr(response, 'PartialErrors') and response.PartialErrors:
+                logger.error("Partial Errors:")
+                for error in response.PartialErrors.BatchError:
+                    logger.error(f"Error Code: {error.Code}")
+                    logger.error(f"Message: {error.Message}")
+                    logger.error(f"Index: {error.Index}")
+            else:
+                logger.info(f"Successfully created audience")
+                if hasattr(response, 'AudienceIds'):
+                    logger.info(f"Audience IDs: {response.AudienceIds.long}")
+
+            return response
+        except Exception as e:
+            logger.error(f"Error creating audience SKD: {str(e)}")
+            raise
+
+    def update_audience_list_sdk(self,parent_id:int,**update_fields: dict[str,Any]) -> None:
+        campaign_types = self.campaign_service.factory.create('ns3:ArrayOfstring')
+        campaign_types.string = ['Audience']
+
+        customer_list = set_elements_to_none(self.campaign_service.factory.create('CustomerList'))
+        customer_list.Id = parent_id
+        
+        if 'audience_network_size' in update_fields:
+            customer_list.AudienceNetworkSize = update_fields['audience_network_size']
+        if 'description' in update_fields:
+            customer_list.Description = update_fields['description'] 
+        if 'membership_duration' in update_fields:
+            customer_list.MembershipDuration = update_fields['membership_duration']
+        if 'name' in update_fields:
+            customer_list.Name = update_fields['name']
+        if 'search_size' in update_fields:
+            customer_list.SearchSize = update_fields['search_size']
+            
+        customer_list.SupportedCampaignTypes = campaign_types
+
+        try:
+            audiences = set_elements_to_none(self.campaign_service.factory.create('ArrayOfAudience'))
+            audiences.Audience = customer_list
+            response = self.campaign_service.UpdateAudiences(Audiences=[audiences])
+
+            if hasattr(response, 'PartialErrors') and response.PartialErrors:
+                logger.error("Partial Errors:")
+                for error in response.PartialErrors.BatchError:
+                    logger.error(f"Error Code: {error.Code}")
+                    logger.error(f"Message: {error.Message}")
+                    logger.error(f"Index: {error.Index}")
+            else:
+                    logger.info("Successfully updated audience")
+            
+            return response
+        except Exception as e:
+            logger.error(f"Error updating audience SDK: {str(e)}")
+            raise
+        
+
+
+def main():
+    try:
+        manager = BingAdsManager()
+        
+        # Create customer lists
+        customer_lists = [
+            manager.create_customer_list(
+                name=f"TestList {i}",
+                description=f"Test Description {i}"
+            )
+            for i in range(10, 12)
+        ]
+
+        # Upload customer lists BULK API
+        #manager.upload_customer_lists(customer_lists)
+
+        #Create Customerlist
+        # manager.create_audience_sdk()
+
+        # Retrive all customer lists
+        # manager.get_all_customer_lists()
+
+        # print all customer lists
+        # for entity in manager.read_download_file('result_latest.csv'):
+        #     if isinstance(entity, BulkCustomerList):
+        #         print(entity.customer_list)
+
+        # Update customer lists
+        # manager.update_customer_lists(832908368, audience_network_size=50, description="Updated description", membership_duration=60, name="Updated Name", search_size=500)
+        manager.update_audience_list_sdk(832971597, audience_network_size=50, description="Updated description", membership_duration=60, name="Updated Name", search_size=500)
+
+
+        # Update audience data
+        #audience_data = [''.join(random.choices(string.ascii_lowercase + string.digits, k=64)) for _ in range(999)]
+        # audience_data = ['93dbbd5ee9b632598cc591f6f4e894c2a081ae8ceb8c3e67356d6ecdf5d5be3c']
+        #  print(audience_data)
+        # manager.update_audience_data(832908368,"",action_type="Add",audience_data=audience_data)
+
+        # manager.update_audience_data_method(832908368,"",action_type="Add",audience_data=audience_data)
+
+
+        
+    except Exception as e:
+        logger.error(f"Main execution failed: {str(e)}")
+        raise
+    
+
+if __name__ == "__main__":
+    main()
