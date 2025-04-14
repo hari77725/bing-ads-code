@@ -96,6 +96,18 @@ class BingAdsManager:
             authorization_data=self.authorization_data,
             environment='sandbox'
         )
+    
+    def _get_customer_list_service(self) -> ServiceClient:
+        return ServiceClient(
+            service='CustomerManagementService',
+            version=13,
+            authorization_data=self.authorization_data,
+            environment='sandbox'
+        )
+
+    def getUetTags(self):
+        res = self.campaign_service.GetUetTagsByIds(None)
+        print(res)
 
     def get_all_customer_lists(self) -> List[BulkCustomerList]:
         return self._get_all_customer_lists()
@@ -118,6 +130,17 @@ class BingAdsManager:
         bulk_customer_list = BulkCustomerList()
         bulk_customer_list.customer_list = customer_list
         return bulk_customer_list
+
+    def get_all_audiences_sdk(self):
+        res = self.campaign_service.GetAudiencesByIds(None,Type="CustomerList")
+        print(res)
+
+    def get_an_audience_sdk(self, audience_id: int | None):
+        response=self.campaign_service.GetAudiencesByIds(
+                AudienceIds={"long": [audience_id]},
+                Type="CustomerList",
+        )
+        print(response)
 
     def upload_customer_lists(self, customer_lists: List[BulkCustomerList]) -> None:
         try:
@@ -314,12 +337,89 @@ class BingAdsManager:
             logger.error(f"Error updating audience data: {str(e)}")
             raise
 
+    def search_accounts_by_user_id(self, user_id: int) -> dict:
+        """
+        Searches for accounts accessible by the given user ID.
+    
+        Args:
+            user_id: The ID of the user.
+    
+        Returns:
+            A dictionary containing account details.
+        """
+        try:
+            # Use CustomerManagementService instead of CampaignManagementService
+            customer_service = self._get_customer_list_service()
+    
+            # Create a request to search accounts by user ID
+            search_accounts_request = customer_service.factory.create('SearchAccountsRequest')
+            search_accounts_request.UserId = user_id
+    
+            # Call the service to get accounts
+            response = customer_service.SearchAccounts(search_accounts_request)
+    
+            # Return the accounts from the response
+            return response.Accounts
+        except Exception as e:
+            logger.error(f"Error searching accounts by user ID: {str(e)}")
+            raise
+
+
+    def get_user_data(self):
+        """
+        Retrieves account details and customer pilot features.
+        """
+        try:
+            # Get the CustomerManagementService client
+            customer_service = self._get_customer_list_service()  # Add parentheses here
+    
+            # Get user details
+            get_user_response = customer_service.GetUser(UserId=None)
+            user = get_user_response.User
+            customer_roles = get_user_response.CustomerRoles
+            print("User:")
+            print(user)
+            
+    
+        except Exception as e:
+            logger.error(f"Error retrieving account data: {str(e)}")
+            raise
+
+    def get_accounts_data(self):
+        """
+        Retrieves account details and customer pilot features.
+        """
+        try:
+            # Get the CustomerManagementService client
+            customer_service = self._get_customer_list_service()
+            
+            # Get accounts info
+            get_accounts_response = customer_service.GetAccountsInfo()
+            
+            # Loop through the accounts and log details
+            if hasattr(get_accounts_response, 'AccountInfo') and get_accounts_response.AccountInfo:
+                for account in get_accounts_response.AccountInfo:
+                    logger.info(
+                        f"Account ID: {account.Id}, "
+                        f"Name: {account.Name}, "
+                        f"Number: {account.Number}, "
+                        f"Status: {account.AccountLifeCycleStatus}, "
+                        f"Pause Reason: {account.PauseReason}"
+                    )
+            else:
+                logger.info("No accounts found.")
+        except Exception as e:
+            logger.error(f"Error retrieving account data: {str(e)}")
+            raise
+
+    
+
     def update_audience_data_method(self, parent_id: int, name: str, action_type: str = "Add", audience_data: List[str] = None):
         try:
-            customer_list = set_elements_to_none(self.campaign_service.factory.create('CustomerList'))
-            customer_list.Id = parent_id
+            # customer_list = set_elements_to_none(self.campaign_service.factory.create('CustomerList'))
+            # customer_list.Id = parent_id
 
-            print(customer_list)
+            # print(customer_list)
 
             customer_list_item = set_elements_to_none(self.campaign_service.factory.create('CustomerListUserData'))
             print(customer_list_item)
@@ -439,6 +539,31 @@ class BingAdsManager:
             logger.error(f"Error creating audience SKD: {str(e)}")
             raise
 
+    def get_offline_conversion_goals(self):
+        try:
+            response=self.campaign_service.GetConversionGoalsByIds(
+                            ConversionGoalTypes="OfflineConversion"
+                        )
+            print(response)
+            if response and hasattr(response, 'ConversionGoals') and response.ConversionGoals:
+                # Access the tuple containing the goals (assuming it's the first element)
+                goals_tuple = response.ConversionGoals[0]
+                print(f"Found {len(goals_tuple)} offline conversion goals:")
+                for i, goal_obj in enumerate(goals_tuple):
+                    try:
+                        # Access the Name attribute directly from the goal object
+                        name = getattr(goal_obj, 'Name', 'Unknown Name')
+                        print(f"- {name}")
+                        logger.debug(f"Processed goal {i}: {name}")
+                    except Exception as e:
+                        logger.error(f"Error processing goal object {i}: {str(e)}\nData: {goal_obj}")
+                        print(f"Goal {i} could not be processed - check logs.")
+            else:
+                print("No offline conversion goals found")
+        except Exception as e:
+            logger.error(f"Error retrieving offline conversion goals: {str(e)}")
+            raise
+
     def update_audience_list_sdk(self,parent_id:int,**update_fields: dict[str,Any]) -> None:
         campaign_types = self.campaign_service.factory.create('ns3:ArrayOfstring')
         campaign_types.string = ['Audience']
@@ -509,16 +634,23 @@ def main():
 
         # Update customer lists
         # manager.update_customer_lists(832908368, audience_network_size=50, description="Updated description", membership_duration=60, name="Updated Name", search_size=500)
-        manager.update_audience_list_sdk(832971597, audience_network_size=50, description="Updated description", membership_duration=60, name="Updated Name", search_size=500)
+        # manager.update_audience_list_sdk(832971597, audience_network_size=50, description="Updated description", membership_duration=60, name="Updated Name", search_size=500)
 
 
         # Update audience data
-        #audience_data = [''.join(random.choices(string.ascii_lowercase + string.digits, k=64)) for _ in range(999)]
+       # audience_data = [''.join(random.choices(string.ascii_lowercase + string.digits, k=64)) for _ in range(999)]
         # audience_data = ['93dbbd5ee9b632598cc591f6f4e894c2a081ae8ceb8c3e67356d6ecdf5d5be3c']
         #  print(audience_data)
         # manager.update_audience_data(832908368,"",action_type="Add",audience_data=audience_data)
 
         # manager.update_audience_data_method(832908368,"",action_type="Add",audience_data=audience_data)
+        # manager.get_accounts_data()
+        # manager.get_user_data()
+
+        #manager.getUetTags()
+        # manager.get_an_audience_sdk(832908368)
+        manager.get_offline_conversion_goals()
+
 
 
         
