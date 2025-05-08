@@ -1,6 +1,6 @@
 from datetime import datetime
 import sys
-from bingads.authorization import AuthorizationData, OAuthDesktopMobileAuthCodeGrant
+from bingads.authorization import AuthorizationData, OAuthDesktopMobileAuthCodeGrant , OAuthWebAuthCodeGrant
 from bingads.v13.bulk import (
     BulkServiceManager, 
     SubmitDownloadParameters, 
@@ -35,8 +35,9 @@ logger = logging.getLogger(__name__)
 DEVELOPER_TOKEN = 'BBD37VB98'
 ACCOUNT_ID = '526065840'
 CUSTOMER_ID = '355788527'
-CLIENT_ID = '4c0b021c-00c3-4508-838f-d3127e8167ff'
-REFRESH_TOKEN = 'M.C1_EUS.0.U.-BOVDZJsLDmzsX0cC!6guYba80l55Sc!H8lesZ4!OfWnxsiMcZvsBuvr20nwukWfpembegBbI2KPR5vTDcd8hcpgH5fWy9kB06RmYG0GMw0EQf8Mn!toyu0IQYhmbeEFFMwG2fdqW9nWU62b63CSCNevWhZu5d!pa5PN0FbGzvyMHutPUiaUvqOb8os4V8AkGfmo739yKt3*ze*O331n5ugbVQSZ0Xzv*hcNi1hsoDtgxSVVc3gW5!BhdxpcbZdaRCdz5XSR4FIvDtyXbjJHSYpCKCz3XbRwv5VGhMhIh*YmA7koQ*VWGaLV35w5avQfGVCwk4uilQ3SxnkiTQQapk2aL4DRBXj47ZtP78CQEdW12BnMQyaxA*bcqx8lNR5HoJOj!zuxwmDDOp0E4vivGa5H5CPwGal3QoSVN7mat7JEyOTDNKu4B8!j23KHIkpxn!w$$'
+CLIENT_ID = '6569b6a6-a20f-46e7-bacf-ae63a128fa28'
+CLIENT_SECRET = 'hnC8Q~mHWehdXQUPLrA315GjuUneJaBbTAi6xak_'
+REFRESH_TOKEN = 'M.C556_BL2.0.U.-Ch2T0kZMPftk*MCmWB4iUNkrVe46jLJ1ge7x4C4rBsEsmfhCYA7eHvBLf35uDtwvE96IJ!adWFKyvZ5z*s1YFKgPWv6jnlyAPSvWm57hjBr1EpyB1wZo2ioHlLJzs366m7uTigeaChlzDcJiklXo3aRxvPG6dZAPI38d!IJ9ZTHATDJZ6d!wbTfz4fq9gLS2YfSu4s92Tlrr1IRIRccnfUXf3nR2LQmrzPAla2lsXrgd9iUfHZudq5D1OS7lJQY33aARp4MH01q6hjLT66EjD3Qe7NHjMMDe8udpksluLhCx76poUkdsFbxO1osi7S*JX4DKvD9hQmKUgu2vyVxXnEX3C!arjcXGwot54JOb9tKyx14Y7ofGwY7Y3is33AYRk*4rwtvpPoIEK8nBqt3MYsqTUpr4C7S!6TrnUHwxZ2f8'
 
 class BingAdsManager:
     def __init__(self):
@@ -49,9 +50,10 @@ class BingAdsManager:
             account_id=ACCOUNT_ID,
             customer_id=CUSTOMER_ID,
             developer_token=DEVELOPER_TOKEN,
-            authentication=OAuthDesktopMobileAuthCodeGrant(
+            authentication=OAuthWebAuthCodeGrant(
                 client_id=CLIENT_ID,
-                env='sandbox'
+                client_secret=CLIENT_SECRET,
+                env='production'
             )
         )
         auth.authentication.request_oauth_tokens_by_refresh_token(REFRESH_TOKEN)
@@ -106,7 +108,7 @@ class BingAdsManager:
         )
 
     def getUetTags(self):
-        res = self.campaign_service.GetUetTagsByIds(None)
+        res = self.campaign_service.GetUetTagsByIds()
         print(res)
 
     def get_all_customer_lists(self) -> List[BulkCustomerList]:
@@ -542,7 +544,7 @@ class BingAdsManager:
     def get_offline_conversion_goals(self):
         try:
             response=self.campaign_service.GetConversionGoalsByIds(
-                            ConversionGoalTypes="OfflineConversion"
+                            ConversionGoalTypes="Event"
                         )
             print(response)
             if response and hasattr(response, 'ConversionGoals') and response.ConversionGoals:
@@ -602,6 +604,16 @@ class BingAdsManager:
         except Exception as e:
             logger.error(f"Error updating audience SDK: {str(e)}")
             raise
+
+    def get_conversion_by_tag(self):
+        try:
+            response = self.campaign_service.GetConversionGoalsByTagIds(
+                ConversionGoalTypes=["OfflineConversion"]
+            )
+            print(response)
+        except Exception as e:
+            logger.error(f"Error retrieving conversion goals by tag: {str(e)}")
+            raise
         
 
 
@@ -622,7 +634,7 @@ def main():
         #manager.upload_customer_lists(customer_lists)
 
         #Create Customerlist
-        # manager.create_audience_sdk()
+        manager.create_audience_sdk()
 
         # Retrive all customer lists
         # manager.get_all_customer_lists()
@@ -647,9 +659,11 @@ def main():
         # manager.get_accounts_data()
         # manager.get_user_data()
 
-        #manager.getUetTags()
+        # manager.getUetTags()
         # manager.get_an_audience_sdk(832908368)
-        manager.get_offline_conversion_goals()
+        # manager.get_offline_conversion_goals()
+        # manager.get_all_goals()
+        manager.get_conversion_by_tag()
 
 
 
